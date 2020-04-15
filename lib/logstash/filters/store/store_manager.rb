@@ -26,6 +26,11 @@ class StoreManager
     @memcached.get(store_name) || {}
   end
 
+  def put_store(store_name, value)
+    @memcached.set(store_name, value)
+  end
+
+
   def enrich(message)
     enrichment = {}
     enrichment.merge!(message)
