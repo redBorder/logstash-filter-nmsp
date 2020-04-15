@@ -1,5 +1,5 @@
 Gem::Specification.new do |s|
-  s.name = 'logstash-filter-meraki'
+  s.name = 'logstash-filter-nmsp'
   s.version = '1.0.0'
   s.licenses = ['Apache License (2.0)']
   s.summary = "This gem obtains the data from a MerakiProcessor and transforms it for further processing."
