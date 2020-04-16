@@ -9,6 +9,7 @@ require "yaml"
 
 require_relative "util/location_constant"
 require_relative "util/memcached_config"
+require_relative "util/NMSPConfig"
 require_relative "store/store_manager"
 
 
@@ -26,7 +27,7 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
   # NMSP_STORE_INFO = "nmsp-info"
 
   #NMSP CONSTANT
-  RSSILIMIT = -85
+  # RSSILIMIT = -85
 
   public
   def register
@@ -42,7 +43,7 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
     @store_manager = StoreManager.new(@memcached)
     @store_measure = @store_manager.get_store(NMSP_STORE_MEASURE) || {}
     @store_info = @store_manager.get_store(NMSP_STORE_INFO) || {}
-    @rssi_limit = RSSILIMIT
+    @rssi_limit = NMSPConfig::read_value 
   end
 
   public
@@ -64,6 +65,7 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
       # List<Integer> clientRssis = (List<Integer>) message.get(NMSP_RSSI);
       clientRssis = event.get(NMSP_RSSI)
       # message.remove(type);
+      event.remove(type)
       if ( clientRssis && !clientRssis.empty? ) && ( apMacs && !apMacs.empty? )
         rssi = clientRssis.max
         apMac = apMacs[clientRssis.index(rssi)] 
@@ -90,7 +92,8 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
               toDruid = nil
             end
           else #last_seen
-            # store_info.delete(mac + namespace_id);
+            @store_info.delete(clientMac + namespace_id)
+            @store_manager.put_store(NMSP_STORE_INFO, @store_info)
             toCache[CLIENT_RSSI_NUM] = rssi
             toCache[WIRELESS_STATION] = apMac
             toCache[NMSP_DOT11STATUS] =  "ASSOCIATED"
@@ -135,16 +138,17 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
          
           toDruid["timestamp"] = timestamp 
           
-          if namespace != "" then
+          if namespace_id != "" then
             toDruid[NAMESPACE_UUID] = namespace_id
           end 
           @store_measure[clientMac + namespace_id] = toCache
           @store_manager.put_store(NMSP_STORE_MEASURE, @store_measure)
 
           store_enrichment = @store_manager.enrich(toDruid)
+          store_enrichment.merge!(toDruid)
 
-          namespace = store_enrichment[NAMESPACE_UUID]
-          datasource = (namespace) ? DATASOURCE + "_" + namespace : DATASOURCE
+          namespace_UUID = store_enrichment[NAMESPACE_UUID]
+          datasource = (namespace_UUID) ? DATASOURCE + "_" + namespace_UUID : DATASOURCE
           counterStore = @memcached.get(COUNTER_STORE)
           counterStore = Hash.new if counterStore.nil?
           counterStore[datasource] = counterStore[datasource].nil? ? 0 : (counterStore[datasource] + 1)
@@ -163,11 +167,10 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
       end  #if rssi
 # ---------------------------------------------------------------
     elsif type && type == NMSP_TYPE_INFO
-      #Object vlan = message.remove(NMSP_VLAN_ID);
-      #message.remove(type)
-
-      vlan = event.get(NMSP_VLAN_ID)
       
+      vlan = event.remove(NMSP_VLAN_ID)
+      event.remove(type)
+ 
       toCache[LAN_VLAN] = vlan if vlan
       
       timestamp = event.get("timestamp") ? event.get(TIMESTAMP).to_i : Time.now.utc.to_i
