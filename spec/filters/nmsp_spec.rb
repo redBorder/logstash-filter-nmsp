@@ -3,6 +3,7 @@ require 'spec_helper'
 require "logstash/filters/nmsp"
 require 'dalli'
 
+
 describe LogStash::Filters::Nmsp do
   describe "Set to Hello World" do
     let(:config) do <<-CONFIG
