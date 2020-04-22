@@ -19,7 +19,7 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
   config_name "nmsp"
 
   config :memcached_server, :validate => :string, :default => "", :required => false
-  config :rssi_limit, :validate => :integer, :default => -80, :required => false
+  config :rssi_limit, :validate => :number, :default => -80, :required => false
 
   #Custom constants
   DATASOURCE =  "rb_location"
