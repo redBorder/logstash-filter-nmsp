@@ -9,8 +9,7 @@ class StoreManager
 
   def initialize(memcached)
     @memcached = memcached
-  end
- 
+  end 
   def get_store_keys(store_name)
     return ["wireless_station"] if store_name == WLC_PSQL_STORE
     return ["sensor_uuid"] if store_name == SENSOR_PSQL_STORE
@@ -26,11 +25,6 @@ class StoreManager
     @memcached.get(store_name) || {}
   end
 
-  def put_store(store_name, value)
-    @memcached.set(store_name, value)
-  end
-
-
   def enrich(message)
     enrichment = {}
     enrichment.merge!(message)
@@ -38,15 +32,18 @@ class StoreManager
     stores_list = [WLC_PSQL_STORE, SENSOR_PSQL_STORE, 
                    NMSP_STORE_MEASURE,NMSP_STORE_INFO,
                    RADIUS_STORE,LOCATION_STORE,DWELL_STORE]
-
-    stores_list.each do |store_name|
+    stores_list.each_with_index do |store_name,index|
       if store_name == SENSOR_PSQL_STORE || store_name == WLC_PSQL_STORE
         store_data = get_store(store_name)
         keys = get_store_keys(store_name)
         namespace = message[NAMESPACE_UUID]
-        mergekey = ""
-        keys.each { |kv| mergekey << enrichment[kv] if enrichment[kv] }
-        contents = store_data[mergekey] ? store_data[mergekey] : (store_data[enrichment[keys.first]] if enrichment[keys.first])
+        merge_key =""
+        keys.each{ |k| merge_key += enrichment[k] if enrichment[k] }
+        contents = store_data[merge_key]
+        if contents.nil?
+          key = enrichment[keys.first] ? keys.first : nil
+          contents = store_data[key.to_s] if key
+        end
         if contents
            psql_namespace = contents[NAMESPACE_UUID]
            if namespace && psql_namespace
@@ -58,16 +55,15 @@ class StoreManager
            end
         end      
       else
+        lan_ip_log = enrichment["lan_ip"] || ""
         store_data = get_store(store_name)
         keys = get_store_keys(store_name)
-        mergekey = ""
-        keys.each { |kv| mergekey << enrichment[kv] if enrichment[kv] }
-        contents = store_data[mergekey]
-        if contents
-          must_overwrite?(store_name) ? enrichment.merge!(contents) : enrichment = contents.merge(enrichment)
-        end
+        merge_key = "" 
+        keys.each{ |k| merge_key += enrichment[k] if enrichment[k] }
+        contents = store_data[merge_key]
+        must_overwrite?(store_name) ? enrichment.merge!(contents) : enrichment = contents.merge(enrichment) if contents
       end
-    end  #end bucle
-    return enrichment
-  end    # end Enrich
-end      # end StoreManager
+    end
+      return enrichment
+  end
+end

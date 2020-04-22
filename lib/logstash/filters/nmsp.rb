@@ -9,7 +9,6 @@ require "yaml"
 
 require_relative "util/location_constant"
 require_relative "util/memcached_config"
-require_relative "util/NMSPConfig"
 require_relative "store/store_manager"
 
 
@@ -20,14 +19,10 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
   config_name "nmsp"
 
   config :memcached_server, :validate => :string, :default => "", :required => false
+  config :rssi_limit, :validate => :integer, :default => -80, :required => false
 
   #Custom constants
   DATASOURCE =  "rb_location"
-  # NMSP_STORE_MEASURE = "nmsp-measure"
-  # NMSP_STORE_INFO = "nmsp-info"
-
-  #NMSP CONSTANT
-  # RSSILIMIT = -85
 
   public
   def register
@@ -43,127 +38,134 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
     @store_manager = StoreManager.new(@memcached)
     @store_measure = @store_manager.get_store(NMSP_STORE_MEASURE) || {}
     @store_info = @store_manager.get_store(NMSP_STORE_INFO) || {}
-    @rssi_limit = NMSPConfig::read_value 
   end
 
   public
-  def filter(event)
-    toDruid = {}
-    toCache = {}
+  def refresh_stores
+    return nil unless @last_refresh_stores.nil? || ((Time.now - @last_refresh_stores) > (60 * 5))
+    @last_refresh_stores = Time.now
+    e = LogStash::Event.new
+    e.set("refresh_stores",true)
+    return e
+  end
 
-    apMacs = []
-    clientRssis = []
+  def filter(event)
+    to_druid = {}
+    to_cache = {}
+
+    ap_macs = []
+    client_rssis = []
 
     type = event.get(TYPE)
-    clientMac = event.get(CLIENT_MAC)
+    client_mac = event.get(CLIENT_MAC)
 
     namespace_id = event.get(NAMESPACE_UUID) ? event.get(NAMESPACE_UUID) : ""
 
     if type && type == NMSP_TYPE_MEASURE then
-      # List<String> apMacs = (List<String>) message.get(NMSP_AP_MAC);
-      apMacs =  event.get(NMSP_AP_MAC)
-      # List<Integer> clientRssis = (List<Integer>) message.get(NMSP_RSSI);
-      clientRssis = event.get(NMSP_RSSI)
+      # List<String> ap_macs = (List<String>) message.get(NMSP_AP_MAC);
+      ap_macs =  event.get(NMSP_AP_MAC)
+      # List<Integer> client_rssis = (List<Integer>) message.get(NMSP_RSSI);
+      client_rssis = event.get(NMSP_RSSI)
       # message.remove(type);
       event.remove(type)
-      if ( clientRssis && !clientRssis.empty? ) && ( apMacs && !apMacs.empty? )
-        rssi = clientRssis.max
-        apMac = apMacs[clientRssis.index(rssi)] 
-        infoCache = @store_info[clientMac + namespace_id]
+      if ( client_rssis && !client_rssis.empty? ) && ( ap_macs && !ap_macs.empty? )
+        rssi = client_rssis.max
+        ap_mac = ap_macs[client_rssis.index(rssi)] 
+        info_cache = @store_info[client_mac + namespace_id]
         dot11_status = "PROBING"
          
-        if infoCache.nil?
-          toCache[CLIENT_RSSI_NUM] = rssi
-          toCache[WIRELESS_STATION] = apMac
-          toCache[NMSP_DOT11STATUS] = "ASSOCIATED"
+        if info_cache.nil?
+          to_cache[CLIENT_RSSI_NUM] = rssi
+          to_cache[WIRELESS_STATION] = ap_mac
+          to_cache[NMSP_DOT11STATUS] = "ASSOCIATED"
           dot11_status = "PROBING"
         else
-          # Integer last_seen = (Integer) infoCache.get("last_seen");
-          last_seen = infoCache["last_seen"].to_i
+          # Integer last_seen = (Integer) info_cache.get("last_seen");
+          last_seen = info_cache["last_seen"].to_i
           
           if (last_seen + 3600) > Time.now.utc.to_i
-            apAssociated = infoCache[WIRELESS_STATION]
-            if apMacs.include?(apAssociated)
-              rssi = clientRssis[apMacs.index(apAssociated)]
-              toCache[CLIENT_RSSI_NUM] = rssi
-              toCache.merge!(infoCache)
+            ap_associated = info_cache[WIRELESS_STATION]
+            if ap_macs.include?(ap_associated)
+              rssi = client_rssis[ap_macs.index(ap_associated)]
+              to_cache[CLIENT_RSSI_NUM] = rssi
+              to_cache.merge!(info_cache)
               dot11_status= "ASSOCIATED"  
             else
-              toDruid = nil
+              to_druid = nil
             end
           else #last_seen
-            @store_info.delete(clientMac + namespace_id)
-            @store_manager.put_store(NMSP_STORE_INFO, @store_info)
-            toCache[CLIENT_RSSI_NUM] = rssi
-            toCache[WIRELESS_STATION] = apMac
-            toCache[NMSP_DOT11STATUS] =  "ASSOCIATED"
+            @store_info.delete(client_mac + namespace_id)
+            @memcached.set(NMSP_STORE_INFO, @store_info)
+            to_cache[CLIENT_RSSI_NUM] = rssi
+            to_cache[WIRELESS_STATION] = ap_mac
+            to_cache[NMSP_DOT11STATUS] =  "ASSOCIATED"
             dot11_status = "PROBING"
           end         
         end #InfoCache.nil?
         if rssi == 0
-          rssiName = "unknown"
+          rssi_name = "unknown"
         elsif rssi <= (-85)
-          rssiName = "bad"
+          rssi_name = "bad"
         elsif rssi <= (-80)
-          rssiName = "low"
+          rssi_name = "low"
         elsif rssi <= (-70)
-          rssiName = "medium"
+          rssi_name = "medium"
         elsif rssi <= (-60)
-          rssiName = "good"
+          rssi_name = "good"
         else
-          rssiName = "excellent"
+          rssi_name = "excellent"
         end
-        toCache[CLIENT_RSSI] = rssiName
+        to_cache[CLIENT_RSSI] = rssi_name
 
         if rssi == 0
-          toCache[CLIENT_PROFILE] = "hard"
+          to_cache[CLIENT_PROFILE] = "hard"
         elsif rssi <= (-75)
-          toCache[CLIENT_PROFILE] = "soft"
+          to_cache[CLIENT_PROFILE] = "soft"
         elsif rssi <= (-65)
-          toCache[CLIENT_PROFILE] = "medium"
+          to_cache[CLIENT_PROFILE] = "medium"
         else
-          toCache[CLIENT_PROFILE] = "hard"
+          to_cache[CLIENT_PROFILE] = "hard"
         end
 
-        if toDruid
-          @dim_to_druid.each { |dimension| (toDruid[dimension] = event.get(dimension)) if event.get(dimension) }
-          toDruid[TYPE] = "nmsp-measure"
-          toDruid[CLIENT_MAC] = clientMac
-          toDruid.merge!(toCache);
-          toDruid[NMSP_DOT11STATUS] = dot11_status
-          toDruid[CLIENT_RSSI_NUM] = rssi
-          toDruid[CLIENT_RSSI] = rssiName
+        if to_druid
+          @dim_to_druid.each { |dimension| (to_druid[dimension] = event.get(dimension)) if event.get(dimension) }
+          to_druid[TYPE] = "nmsp-measure"
+          to_druid[CLIENT_MAC] = client_mac
+          to_druid.merge!(to_cache);
+          to_druid[NMSP_DOT11STATUS] = dot11_status
+          to_druid[CLIENT_RSSI_NUM] = rssi
+          to_druid[CLIENT_RSSI] = rssi_name
 
           timestamp = event.get(TIMESTAMP) ? event.get(TIMESTAMP) : Time.now.utc.to_i
          
-          toDruid["timestamp"] = timestamp 
+          to_druid["timestamp"] = timestamp 
           
           if namespace_id != "" then
-            toDruid[NAMESPACE_UUID] = namespace_id
+            to_druid[NAMESPACE_UUID] = namespace_id
           end 
-          @store_measure[clientMac + namespace_id] = toCache
-          @store_manager.put_store(NMSP_STORE_MEASURE, @store_measure)
+          @store_measure[client_mac + namespace_id] = to_cache
+          @memcached.set(NMSP_STORE_MEASURE, @store_measure)
 
-          store_enrichment = @store_manager.enrich(toDruid)
-          store_enrichment.merge!(toDruid)
+          store_enrichment = @store_manager.enrich(to_druid)
+          store_enrichment.merge!(to_druid)
 
           namespace_UUID = store_enrichment[NAMESPACE_UUID]
           datasource = (namespace_UUID) ? DATASOURCE + "_" + namespace_UUID : DATASOURCE
-          counterStore = @memcached.get(COUNTER_STORE)
-          counterStore = Hash.new if counterStore.nil?
-          counterStore[datasource] = counterStore[datasource].nil? ? 0 : (counterStore[datasource] + 1)
-          @memcached.set(COUNTER_STORE,counterStore)
+          counter_store = @memcached.get(COUNTER_STORE)
+          counter_store = Hash.new if counter_store.nil?
+          counter_store[datasource] = counter_store[datasource].nil? ? 0 : (counter_store[datasource] + 1)
+          @memcached.set(COUNTER_STORE,counter_store)
  
-          flowsNumber = @memcached.get(FLOWS_NUMBER)
-          flowsNumber = Hash.new if flowsNumber.nil?
-          store_enrichment["flows_count"] = flowsNumber[datasource] if flowsNumber[datasource]
+          flows_number = @memcached.get(FLOWS_NUMBER)
+          flows_number = Hash.new if flows_number.nil?
+          store_enrichment["flows_count"] = flows_number[datasource] if flows_number[datasource]
 
           if rssi >= @rssi_limit || dot11_status == "ASSOCIATED"
-            enrichmentEvent = LogStash::Event.new
-            store_enrichment.each {|k,v| enrichmentEvent.set(k,v)}
-            yield enrichmentEvent
+            enrichment_event = LogStash::Event.new
+            store_enrichment.each {|k,v| enrichment_event.set(k,v)}
+            yield enrichment_event
           end #if new event
-        end #toDruid
+        end #to_druid
       end  #if rssi
 # ---------------------------------------------------------------
     elsif type && type == NMSP_TYPE_INFO
@@ -171,44 +173,47 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
       vlan = event.remove(NMSP_VLAN_ID)
       event.remove(type)
  
-      toCache[LAN_VLAN] = vlan if vlan
+      to_cache[LAN_VLAN] = vlan if vlan
       
       timestamp = event.get("timestamp") ? event.get(TIMESTAMP).to_i : Time.now.utc.to_i
       
-      @dim_to_cache_info.each { |dimension| (toCache[dimension] = event.get(dimension)) if event.get(dimension) }
+      @dim_to_cache_info.each { |dimension| (to_cache[dimension] = event.get(dimension)) if event.get(dimension) }
       
-      toCache["last_seen"] = timestamp
-      toCache[NMSP_DOT11STATUS] = "ASSOCIATED"
-      toDruid.merge!(toCache)
+      to_cache["last_seen"] = timestamp
+      to_cache[NMSP_DOT11STATUS] = "ASSOCIATED"
+      to_druid.merge!(to_cache)
 
-      @dim_to_druid.each { |dimension| (toDruid[dimension] = event.get(dimension)) if event.get(dimension) }
-      toDruid["timestamp"] = timestamp
-      toDruid[TYPE] = "nmsp-info"
-      toDruid[NAMESPACE_UUID] = namespace_id if namespace_id != ""
-      toDruid[CLIENT_PROFILE] = "hard"
-      toDruid[CLIENT_MAC] = clientMac
-      @store_info[clientMac + namespace_id] = toCache
-      @store_manager.put_store(NMSP_STORE_INFO, @store_info)    #almacenado en memcached
+      @dim_to_druid.each { |dimension| (to_druid[dimension] = event.get(dimension)) if event.get(dimension) }
+      to_druid["timestamp"] = timestamp
+      to_druid[TYPE] = "nmsp-info"
+      to_druid[NAMESPACE_UUID] = namespace_id if namespace_id != ""
+      to_druid[CLIENT_PROFILE] = "hard"
+      to_druid[CLIENT_MAC] = client_mac
+      @store_info[client_mac + namespace_id] = to_cache
+      @memcached.set(NMSP_STORE_INFO, @store_info)    #almacenado en memcached
 
-      store_enrichment = @store_manager.enrich(toDruid)
-      store_enrichment.merge!(toDruid)
+      store_enrichment = @store_manager.enrich(to_druid)
+      store_enrichment.merge!(to_druid)
 
       namespace_UUID = store_enrichment[NAMESPACE_UUID]
       datasource = (namespace_UUID) ? DATASOURCE + "_" + namespace_UUID : DATASOURCE
       
-      counterStore = @memcached.get(COUNTER_STORE)
-      counterStore = Hash.new if counterStore.nil?
-      counterStore[datasource] = counterStore[datasource].nil? ? 0 : (counterStore[datasource] + 1)
-      @memcached.set(COUNTER_STORE,counterStore)
+      counter_store = @memcached.get(COUNTER_STORE)
+      counter_store = Hash.new if counter_store.nil?
+      counter_store[datasource] = counter_store[datasource].nil? ? 0 : (counter_store[datasource] + 1)
+      @memcached.set(COUNTER_STORE,counter_store)
  
-      flowsNumber = @memcached.get(FLOWS_NUMBER)
-      flowsNumber = Hash.new if flowsNumber.nil?
-      store_enrichment["flows_count"] = flowsNumber[datasource] if flowsNumber[datasource]
+      flows_number = @memcached.get(FLOWS_NUMBER)
+      flows_number = Hash.new if flows_number.nil?
+      store_enrichment["flows_count"] = flows_number[datasource] if flows_number[datasource]
 
-      enrichmentEvent = LogStash::Event.new
-      store_enrichment.each {|k,v| enrichmentEvent.set(k,v)}
-      yield enrichmentEvent
+      enrichment_event = LogStash::Event.new
+      store_enrichment.each {|k,v| enrichment_event.set(k,v)}
+      yield enrichment_event
     end #if else
+
+    event_refresh = refresh_stores
+    yield event_refresh if event_refresh
     event.cancel
   end   # def filter
 end     # class Logstash::Filter::Nmsp
