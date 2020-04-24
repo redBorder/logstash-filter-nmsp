@@ -66,6 +66,6 @@ class StoreManager
         must_overwrite?(store_name) ? enrichment.merge!(contents) : enrichment = contents.merge(enrichment) if contents
       end
     end
-      return enrichment
+      return enrichment.reject { |k,v| v.nil? || ((v.is_a?Hash) && (v.empty?)) }
   end
 end
