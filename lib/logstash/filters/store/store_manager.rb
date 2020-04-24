@@ -37,8 +37,9 @@ class StoreManager
         store_data = get_store(store_name)
         keys = get_store_keys(store_name)
         namespace = message[NAMESPACE_UUID]
+        namespace = nil if (namespace && namespace.empty?)
         merge_key =""
-        keys.each{ |k| merge_key += enrichment[k] if enrichment[k] }
+        keys.each{ |k| merge_key += enrichment[k] if (enrichment[k] && !enrichment[k].empty?) }
         contents = store_data[merge_key]
         if contents.nil?
           key = enrichment[keys.first] ? keys.first : nil
@@ -46,6 +47,7 @@ class StoreManager
         end
         if contents
            psql_namespace = contents[NAMESPACE_UUID]
+           psql_namespace = nil if (psql_namespace && psql_namespace.empty?)
            if namespace && psql_namespace
                if namespace == psql_namespace
                  must_overwrite?(store_name) ? enrichment.merge!(contents) : enrichment = contents.merge(enrichment)
@@ -58,8 +60,8 @@ class StoreManager
         lan_ip_log = enrichment["lan_ip"] || ""
         store_data = get_store(store_name)
         keys = get_store_keys(store_name)
-        merge_key = "" 
-        keys.each{ |k| merge_key += enrichment[k] if enrichment[k] }
+        merge_key = ""
+        keys.each{ |k| merge_key += enrichment[k] if (enrichment[k] && !enrichment[k].empty?) }
         contents = store_data[merge_key]
         must_overwrite?(store_name) ? enrichment.merge!(contents) : enrichment = contents.merge(enrichment) if contents
       end

@@ -149,8 +149,10 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
           store_enrichment = @store_manager.enrich(to_druid)
           store_enrichment.merge!(to_druid)
 
-          namespace_UUID = store_enrichment[NAMESPACE_UUID]
-          datasource = (namespace_UUID) ? DATASOURCE + "_" + namespace_UUID : DATASOURCE
+          datasource = DATASOURCE
+          namespace = store_enrichment[NAMESPACE_UUID]
+          datasource = (namespace) ? DATASOURCE + "_" + namespace : DATASOURCE if (namespace && !namespace.empty?)
+
           counter_store = @memcached.get(COUNTER_STORE)
           counter_store = Hash.new if counter_store.nil?
           counter_store[datasource] = counter_store[datasource].nil? ? 0 : (counter_store[datasource] + 1)
