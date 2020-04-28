@@ -39,7 +39,7 @@ class StoreManager
         namespace = message[NAMESPACE_UUID]
         namespace = nil if (namespace && namespace.empty?)
         merge_key =""
-        keys.each{ |k| merge_key += enrichment[k] if (enrichment[k] && !enrichment[k].empty?) }
+        keys.each{ |k| merge_key += enrichment[k].to_s if enrichment[k] }
         contents = store_data[merge_key]
         if contents.nil?
           key = enrichment[keys.first] ? keys.first : nil
@@ -61,11 +61,11 @@ class StoreManager
         store_data = get_store(store_name)
         keys = get_store_keys(store_name)
         merge_key = ""
-        keys.each{ |k| merge_key += enrichment[k] if (enrichment[k] && !enrichment[k].empty?) }
+        keys.each{ |k| merge_key += enrichment[k] if enrichment[k] }
         contents = store_data[merge_key]
         must_overwrite?(store_name) ? enrichment.merge!(contents) : enrichment = contents.merge(enrichment) if contents
       end
     end
-      return enrichment.reject { |k,v| v.nil? || ((v.is_a?Hash) && (v.empty?)) }
+      return enrichment.reject { |k,v| v.nil? || (v.is_a?Hash) }
   end
 end
