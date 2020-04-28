@@ -11,8 +11,6 @@ require_relative "util/location_constant"
 require_relative "util/memcached_config"
 require_relative "store/store_manager"
 
-
-
 class LogStash::Filters::Nmsp < LogStash::Filters::Base
   include LocationConstant
 
@@ -31,7 +29,7 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
 
     @dim_to_cache_info = [WIRELESS_STATION, WIRELESS_CHANNEL, WIRELESS_ID, NMSP_DOT11PROTOCOL] 
     
-    @memcached_server = MemcachedConfig::servers.first if @memcached_server.empty?
+    @memcached_server = MemcachedConfig::servers if @memcached_server.empty?
     @memcached = Dalli::Client.new(@memcached_server, {:expires_in => 0, :value_max_bytes => 4000000})
     
     @store = @memcached.get(LOCATION_STORE) || {}
