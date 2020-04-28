@@ -41,13 +41,6 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
   end
 
   public
-  def refresh_stores
-    return nil unless @last_refresh_stores.nil? || ((Time.now - @last_refresh_stores) > (60 * 5))
-    @last_refresh_stores = Time.now
-    e = LogStash::Event.new
-    e.set("refresh_stores",true)
-    return e
-  end
 
   def filter(event)
     to_druid = {}
@@ -214,8 +207,6 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
       yield enrichment_event
     end #if else
 
-    event_refresh = refresh_stores
-    yield event_refresh if event_refresh
     event.cancel
   end   # def filter
 end     # class Logstash::Filter::Nmsp
