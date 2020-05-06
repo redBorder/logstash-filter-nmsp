@@ -144,9 +144,7 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
           store_enrichment.merge!(to_druid)
 
           if @counter_store_counter or @flow_counter
-            datasource = DATASOURCE
-            namespace = store_enrichment[NAMESPACE_UUID]
-            datasource = (namespace) ? DATASOURCE + "_" + namespace : DATASOURCE if (namespace && !namespace.empty?)
+            datasource = store_enrichment[NAMESPACE_UUID] ? DATASOURCE + "_" + store_enrichment[NAMESPACE_UUID] : DATASOURCE 
 
             if @counter_store_counter
               counter_store = @memcached.get(COUNTER_STORE) || {}
@@ -197,8 +195,8 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
       store_enrichment.merge!(to_druid)
 
       if @counter_store_counter or @flow_counter
-        namespace_UUID = store_enrichment[NAMESPACE_UUID]
-        datasource = (namespace_UUID) ? DATASOURCE + "_" + namespace_UUID : DATASOURCE
+        datasource = store_enrichment[NAMESPACE_UUID] ? DATASOURCE + "_" + store_enrichment[NAMESPACE_UUID] : DATASOURCE 
+        
         if @counter_store_counter
          counter_store = @memcached.get(COUNTER_STORE) || {}
          counter = counter_store[datasource] || 0
