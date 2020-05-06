@@ -143,20 +143,22 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
           store_enrichment = @store_manager.enrich(to_druid)
           store_enrichment.merge!(to_druid)
 
-          datasource = DATASOURCE
-          namespace = store_enrichment[NAMESPACE_UUID]
-          datasource = (namespace) ? DATASOURCE + "_" + namespace : DATASOURCE if (namespace && !namespace.empty?)
+          if @counter_store_counter or @flow_counter
+            datasource = DATASOURCE
+            namespace = store_enrichment[NAMESPACE_UUID]
+            datasource = (namespace) ? DATASOURCE + "_" + namespace : DATASOURCE if (namespace && !namespace.empty?)
 
-          if @counter_store_counter
-            counter_store = @memcached.get(COUNTER_STORE) || {}
-            counter = counter_store[datasource] || 0
-            counter_store[datasource] = counter + splitted_msg.size
-            @memcached.set(COUNTER_STORE,counter_store)
-          end
+            if @counter_store_counter
+              counter_store = @memcached.get(COUNTER_STORE) || {}
+              counter = counter_store[datasource] || 0
+              counter_store[datasource] = counter + splitted_msg.size
+              @memcached.set(COUNTER_STORE,counter_store)
+            end
       
-          if @flow_counter
-            flows_number = @memcached.get(FLOWS_NUMBER) || {}
-            store_enrichment["flows_count"] = (flows_number[datasource] || 0)
+            if @flow_counter
+              flows_number = @memcached.get(FLOWS_NUMBER) || {}
+              store_enrichment["flows_count"] = (flows_number[datasource] || 0)
+            end
           end
 
           if rssi >= @rssi_limit || dot11_status == "ASSOCIATED"
@@ -194,18 +196,20 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
       store_enrichment = @store_manager.enrich(to_druid)
       store_enrichment.merge!(to_druid)
 
-      namespace_UUID = store_enrichment[NAMESPACE_UUID]
-      datasource = (namespace_UUID) ? DATASOURCE + "_" + namespace_UUID : DATASOURCE
-      if @counter_store_counter
-       counter_store = @memcached.get(COUNTER_STORE) || {}
-       counter = counter_store[datasource] || 0
-       counter_store[datasource] = counter + splitted_msg.size
-       @memcached.set(COUNTER_STORE,counter_store)
-      end
-      
-      if @flow_counter
-       flows_number = @memcached.get(FLOWS_NUMBER) || {}
-       store_enrichment["flows_count"] = (flows_number[datasource] || 0)
+      if @counter_store_counter or @flow_counter
+        namespace_UUID = store_enrichment[NAMESPACE_UUID]
+        datasource = (namespace_UUID) ? DATASOURCE + "_" + namespace_UUID : DATASOURCE
+        if @counter_store_counter
+         counter_store = @memcached.get(COUNTER_STORE) || {}
+         counter = counter_store[datasource] || 0
+         counter_store[datasource] = counter + splitted_msg.size
+         @memcached.set(COUNTER_STORE,counter_store)
+        end
+        
+        if @flow_counter
+         flows_number = @memcached.get(FLOWS_NUMBER) || {}
+         store_enrichment["flows_count"] = (flows_number[datasource] || 0)
+        end
       end
        
       enrichment_event = LogStash::Event.new
