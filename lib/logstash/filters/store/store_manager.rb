@@ -7,8 +7,13 @@ class StoreManager
 
   attr_accessor :memcached
 
-  def initialize(memcached)
+  def initialize(memcached, update_stores_rate = 60)
     @memcached = memcached
+    @stores_list = [WLC_PSQL_STORE, SENSOR_PSQL_STORE, 
+                   NMSP_STORE_MEASURE,NMSP_STORE_INFO,
+                   RADIUS_STORE,LOCATION_STORE,DWELL_STORE]
+    @update_stores_rate = update_stores_rate
+    update_stores
   end 
   def get_store_keys(store_name)
     return ["wireless_station"] if store_name == WLC_PSQL_STORE
@@ -21,20 +26,20 @@ class StoreManager
     NMSP_STORE_MEASURE, NMSP_STORE_INFO].include?store_name ? false : true
   end
 
-  def get_store(store_name)
-    @memcached.get(store_name) || {}
+  def update_stores
+    @last_stores_update = Time.now
+    @stores = @memcached.get_multi(@stores_list) || {}
   end
 
   def enrich(message)
+    update_stores if (Time.now - @last_stores_update) > @update_stores_rate    
     enrichment = {}
     enrichment.merge!(message)
-
-    stores_list = [WLC_PSQL_STORE, SENSOR_PSQL_STORE, 
-                   NMSP_STORE_MEASURE,NMSP_STORE_INFO,
-                   RADIUS_STORE,LOCATION_STORE,DWELL_STORE]
-    stores_list.each_with_index do |store_name,index|
+  
+    @stores_list.each_with_index do |store_name,index|
       if store_name == SENSOR_PSQL_STORE || store_name == WLC_PSQL_STORE
-        store_data = get_store(store_name)
+        store_data = @stores[store_name]
+        next unless store_data
         keys = get_store_keys(store_name)
         namespace = message[NAMESPACE_UUID]
         namespace = nil if (namespace && namespace.empty?)
@@ -58,7 +63,8 @@ class StoreManager
         end      
       else
         lan_ip_log = enrichment["lan_ip"] || ""
-        store_data = get_store(store_name)
+        store_data = @stores[store_name]
+        next unless store_data
         keys = get_store_keys(store_name)
         merge_key = ""
         keys.each{ |k| merge_key += enrichment[k] if enrichment[k] }
