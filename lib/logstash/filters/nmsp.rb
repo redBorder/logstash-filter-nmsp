@@ -35,15 +35,22 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
     @memcached_server = MemcachedConfig::servers if @memcached_server.empty?
     @memcached = Dalli::Client.new(@memcached_server, {:expires_in => 0, :value_max_bytes => 4000000})
     
-    @store = @memcached.get(LOCATION_STORE) || {}
     @store_manager = StoreManager.new(@memcached, @update_stores_rate)
-    @store_measure = @store_manager.get_store(NMSP_STORE_MEASURE) || {}
-    @store_info = @store_manager.get_store(NMSP_STORE_INFO) || {}
   end
 
   public
 
+  def get_stores
+    #@store_measure = @store_manager.get_store(NMSP_STORE_MEASURE) || {}
+    #@store_info = @store_manager.get_store(NMSP_STORE_INFO) || {}
+    @stores = @memcached.get_multi(NMSP_STORE_MEASURE, NMSP_STORE_INFO, "#{NMSP_STORE_INFO}-historical") || {}
+    @store_measure = @stores[NMSP_STORE_MEASURE] || {}
+    @store_info = @stores[NMSP_STORE_INFO]
+    @store_info_historical = @stores["#{NMSP_STORE_INFO}-historical"]
+    
+  end
   def filter(event)
+    get_stores
     to_druid = {}
     to_cache = {}
 
@@ -66,6 +73,7 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
         rssi = client_rssis.max
         ap_mac = ap_macs[client_rssis.index(rssi)] 
         info_cache = @store_info[client_mac + namespace_id]
+        info_cache = @store_info_historical[client_mac + namespace_id] if info_cache.nil?
         dot11_status = "PROBING"
          
         if info_cache.nil?
@@ -89,7 +97,9 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
             end
           else #last_seen
             @store_info.delete(client_mac + namespace_id)
+            @store_info_historical.delete(client_mac + namespace_id)
             @memcached.set(NMSP_STORE_INFO, @store_info)
+            @memcached.set("#{NMSP_STORE_INFO}-historical", @store_info_historical)
             to_cache[CLIENT_RSSI_NUM] = rssi
             to_cache[WIRELESS_STATION] = ap_mac
             to_cache[NMSP_DOT11STATUS] =  "ASSOCIATED"

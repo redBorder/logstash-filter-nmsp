@@ -11,10 +11,16 @@ class StoreManager
     @memcached = memcached
     @stores_list = [WLC_PSQL_STORE, SENSOR_PSQL_STORE, 
                    NMSP_STORE_MEASURE,NMSP_STORE_INFO,
-                   RADIUS_STORE,LOCATION_STORE,DWELL_STORE]
+                   RADIUS_STORE, LOCATION_STORE, DWELL_STORE]
+    @historical_stores = ["#{RADIUS_STORE}-historical",
+                          "#{LOCATION_STORE}-historical", 
+                          "#{NMSP_STORE_MEASURE}-historical",
+                          "#{NMSP_STORE_INFO}-historical",]
+    @stores_list = @stores_list + @historical_stores
     @update_stores_rate = update_stores_rate
     update_stores
-  end 
+  end
+
   def get_store_keys(store_name)
     return ["wireless_station"] if store_name == WLC_PSQL_STORE
     return ["sensor_uuid"] if store_name == SENSOR_PSQL_STORE
@@ -37,6 +43,8 @@ class StoreManager
     enrichment.merge!(message)
   
     @stores_list.each_with_index do |store_name,index|
+      # Lets skip the historical stores, we will check later in case is not found on the current ones.
+      next if store_name.end_with?"-historical"
       if store_name == SENSOR_PSQL_STORE || store_name == WLC_PSQL_STORE
         store_data = @stores[store_name]
         next unless store_data
@@ -62,13 +70,16 @@ class StoreManager
            end
         end      
       else
-        lan_ip_log = enrichment["lan_ip"] || ""
         store_data = @stores[store_name]
         next unless store_data
         keys = get_store_keys(store_name)
         merge_key = ""
         keys.each{ |k| merge_key += enrichment[k] if enrichment[k] }
         contents = store_data[merge_key]
+        # If no contents on the current one and the store has an historical one, check the historical also
+        if contents.nil? and @historical_stores.include?"#{store_name}-historical"
+          contents = @stores["#{store_name}-historical"][merge_key] if @stores["#{store_name}-historical"]
+        end
         must_overwrite?(store_name) ? enrichment.merge!(contents) : enrichment = contents.merge(enrichment) if contents
       end
     end
