@@ -45,8 +45,8 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
     #@store_info = @store_manager.get_store(NMSP_STORE_INFO) || {}
     @stores = @memcached.get_multi(NMSP_STORE_MEASURE, NMSP_STORE_INFO, "#{NMSP_STORE_INFO}-historical") || {}
     @store_measure = @stores[NMSP_STORE_MEASURE] || {}
-    @store_info = @stores[NMSP_STORE_INFO]
-    @store_info_historical = @stores["#{NMSP_STORE_INFO}-historical"]
+    @store_info = @stores[NMSP_STORE_INFO] || {}
+    @store_info_historical = @stores["#{NMSP_STORE_INFO}-historical"] || {}
     
   end
   def filter(event)
