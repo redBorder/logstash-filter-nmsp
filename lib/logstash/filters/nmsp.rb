@@ -16,24 +16,26 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
 
   config_name "nmsp"
 
-  config :memcached_server,      :validate => :string, :default => "",       :required => false
-  config :rssi_limit,            :validate => :number, :default => -80,      :required => false
-  config :counter_store_counter, :validate => :boolean, :default => false,   :required => false
-  config :flow_counter,          :validate => :boolean, :default => false,   :required => false
-  config :update_stores_rate,    :validate => :number,  :default => 60,      :required => false
+  config :memcached_server,       :validate => :string,  :default => "",       :required => false
+  config :rssi_limit,             :validate => :number,  :default => -80,      :required => false
+  config :counter_store_counter,  :validate => :boolean, :default => false,    :required => false
+  config :flow_counter,           :validate => :boolean, :default => false,    :required => false
+  config :update_stores_rate,     :validate => :number,  :default => 60,       :required => false
+  config :max_keys_nmsp_to_clean, :validate => :number,  :default => 700,      :required => false
 
   #Custom constants
   DATASOURCE =  "rb_location"
 
   public
   def register
+
     @dim_to_druid = [ MARKET, MARKET_UUID, ORGANIZATION, ORGANIZATION_UUID, DEPLOYMENT, 
                      DEPLOYMENT_UUID, SENSOR_NAME, SENSOR_UUID, NAMESPACE, SERVICE_PROVIDER, SERVICE_PROVIDER_UUID]
 
     @dim_to_cache_info = [WIRELESS_STATION, WIRELESS_CHANNEL, WIRELESS_ID, NMSP_DOT11PROTOCOL] 
     
     @memcached_server = MemcachedConfig::servers if @memcached_server.empty?
-    @memcached = Dalli::Client.new(@memcached_server, {:expires_in => 0, :value_max_bytes => 4000000})
+    @memcached = Dalli::Client.new(@memcached_server, {:expires_in => 0})
     
     @store_manager = StoreManager.new(@memcached, @update_stores_rate)
   end
@@ -41,8 +43,6 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
   public
 
   def get_stores
-    #@store_measure = @store_manager.get_store(NMSP_STORE_MEASURE) || {}
-    #@store_info = @store_manager.get_store(NMSP_STORE_INFO) || {}
     @stores = @memcached.get_multi(NMSP_STORE_MEASURE, NMSP_STORE_INFO, "#{NMSP_STORE_INFO}-historical") || {}
     @store_measure = @stores[NMSP_STORE_MEASURE] || {}
     @store_info = @stores[NMSP_STORE_INFO] || {}
@@ -84,7 +84,6 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
         else
           # Integer last_seen = (Integer) info_cache.get("last_seen");
           last_seen = info_cache["last_seen"].to_i
-          
           if (last_seen + 3600) > Time.now.utc.to_i
             ap_associated = info_cache[WIRELESS_STATION]
             if ap_macs.include?(ap_associated)
@@ -147,11 +146,15 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
           if namespace_id != "" then
             to_druid[NAMESPACE_UUID] = namespace_id
           end 
+          
+          @store_measure.delete(client_mac + namespace_id) if @store_measure.key? (client_mac + namespace_id) and @store_info.key? (client_mac + namespace_id) 
+
           @store_measure[client_mac + namespace_id] = to_cache
-          @memcached.set(NMSP_STORE_MEASURE, @store_measure)
+          @store_measure = @store_measure.map{|h| h}[(-@max_keys_nmsp_to_clean+100)..-1].to_h if @store_measure.keys.count > @max_keys_nmsp_to_clean 
+          @memcached.set(NMSP_STORE_MEASURE, @store_measure) if @store_info.key? (client_mac + namespace_id)
 
           store_enrichment = @store_manager.enrich(to_druid)
-          store_enrichment.merge!(to_druid)
+          #store_enrichment.merge!(to_druid)
 
           if @counter_store_counter or @flow_counter
             datasource = store_enrichment[NAMESPACE_UUID] ? DATASOURCE + "_" + store_enrichment[NAMESPACE_UUID] : DATASOURCE 
@@ -169,11 +172,7 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
             end
           end
 
-          if rssi >= @rssi_limit || dot11_status == "ASSOCIATED"
-            enrichment_event = LogStash::Event.new
-            store_enrichment.each {|k,v| enrichment_event.set(k,v)}
-            yield enrichment_event
-          end #if new event
+          yield LogStash::Event.new(store_enrichment) if (rssi >= @rssi_limit || dot11_status == "ASSOCIATED") 
         end #to_druid
       end  #if rssi
 # ---------------------------------------------------------------
@@ -220,9 +219,7 @@ class LogStash::Filters::Nmsp < LogStash::Filters::Base
         end
       end
        
-      enrichment_event = LogStash::Event.new
-      store_enrichment.each {|k,v| enrichment_event.set(k,v)}
-      yield enrichment_event
+      yield LogStash::Event.new(store_enrichment)
     end #if else
 
     event.cancel
